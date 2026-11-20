@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Template: `make install` fills in @REPO@ and @HOME@, since launchd needs absolute paths -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.avo.pr-tracker</string>
+    <!-- The venv python directly: a `uv run` parent process would add ~27 MB RSS -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>@REPO@/.venv/bin/python</string>
+        <string>-m</string>
+        <string>prt</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>@REPO@</string>
+    <!-- launchd uses a bare PATH; mth, uv, pandoc, and gh live in these directories -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>@HOME@/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>@HOME@/Library/Logs/pr-tracker.log</string>
+    <key>StandardErrorPath</key>
+    <string>@HOME@/Library/Logs/pr-tracker.log</string>
+</dict>
+</plist>
