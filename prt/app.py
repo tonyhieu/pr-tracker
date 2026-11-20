@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from prt import db, ingest, parser, states
+from prt import db, github, ingest, parser, states
 from prt.events import Broker
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -204,6 +204,11 @@ async def patch_pr(request: Request) -> JSONResponse:
     return JSONResponse(find_pr(conn, pr["id"]))
 
 
+async def run_sync(request: Request) -> JSONResponse:
+    app = request.app
+    return JSONResponse(await github.sync(app.state.db, app.state.broker.publish))
+
+
 async def sse(request: Request) -> StreamingResponse:
     return StreamingResponse(
         request.app.state.broker.stream(),
@@ -213,21 +218,27 @@ async def sse(request: Request) -> StreamingResponse:
 
 
 def create_app(
-    db_path: Path | str = db.DEFAULT_DB_PATH, watch_interval: float = ingest.WATCH_SECONDS
+    db_path: Path | str = db.DEFAULT_DB_PATH,
+    watch_interval: float = ingest.WATCH_SECONDS,
+    sync_interval: float = github.SYNC_SECONDS,
 ) -> Starlette:
     @asynccontextmanager
     async def lifespan(app: Starlette):
         app.state.db = db.connect(db_path)
         app.state.broker = Broker()
-        watcher = asyncio.create_task(
-            ingest.watch(app.state.db, app.state.broker.publish, watch_interval)
-        )
+        tasks = [
+            asyncio.create_task(
+                ingest.watch(app.state.db, app.state.broker.publish, watch_interval)
+            ),
+            asyncio.create_task(github.poll(app.state.db, app.state.broker.publish, sync_interval)),
+        ]
         try:
             yield
         finally:
-            watcher.cancel()
-            with suppress(asyncio.CancelledError):
-                await watcher
+            for task in tasks:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             app.state.db.close()
 
     # StaticFiles fails on requests if the directory is missing, e.g. before `make build`.
@@ -240,6 +251,7 @@ def create_app(
         Route("/api/prs", lookup_pr),
         Route("/api/prs/{id}", get_pr),
         Route("/api/prs/{id}", patch_pr, methods=["PATCH"]),
+        Route("/api/sync", run_sync, methods=["POST"]),
         Route("/api/events", sse),
         Mount("/", StaticFiles(directory=STATIC_DIR, html=True)),
     ]
