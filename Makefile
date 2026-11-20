@@ -17,3 +17,4 @@ test: web/node_modules
 	uv run pytest
 	cd web && npm run typecheck
 	cd web && npm run build
+	node --test pi/hooks.test.ts
