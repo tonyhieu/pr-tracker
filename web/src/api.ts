@@ -1,4 +1,4 @@
-import type { PR, PRDetail, Plan, PlanDetail, Status } from "./types";
+import type { Mode, PR, PRDetail, Plan, PlanDetail, Status } from "./types";
 
 export class ApiError extends Error {}
 
@@ -15,13 +15,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const id = encodeURIComponent;
 
 export const api = {
+  mode: () => request<{ mode: Mode }>("/api/mode").then((r) => r.mode),
   plans: () => request<Plan[]>("/api/plans"),
   plan: (planId: string) => request<PlanDetail>(`/api/plans/${id(planId)}`),
   pr: (prId: string) => request<PRDetail>(`/api/prs/${id(prId)}`),
-  patchPr: (prId: string, body: { status?: Status; url?: string | null; force?: boolean }) =>
+  patchPr: (
+    prId: string,
+    body: { status?: Status; url?: string | null; force?: boolean },
+    mode: Mode,
+  ) =>
     request<PR>(`/api/prs/${id(prId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ ...body, source: "human" }),
+      // The viewer sets `source: human` itself and rejects any other field.
+      body: JSON.stringify(mode === "viewer" ? body : { ...body, source: "human" }),
     }),
   sync: () => request<unknown>("/api/sync", { method: "POST" }),
 };

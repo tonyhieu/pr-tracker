@@ -1,0 +1,8 @@
+# Started daily by pr-tracker-backup.timer; keeps 14 copies under ~/.local/share/pr-tracker/backups/.
+[Unit]
+Description=Back up the PR tracker DB
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/GitHub/pr-tracker
+ExecStart=%h/GitHub/pr-tracker/.venv/bin/python -m prt.backup

@@ -29,7 +29,12 @@ def allowed(status: str) -> list[str]:
 
 
 def transition(
-    conn: sqlite3.Connection, pr: dict, to: str, source: str, force: bool = False
+    conn: sqlite3.Connection,
+    pr: dict,
+    to: str,
+    source: str,
+    force: bool = False,
+    actor: str | None = None,
 ) -> bool:
     """Move `pr` to `to` and record an event; returns False for a same-status no-op.
 
@@ -50,9 +55,9 @@ def transition(
     ts = now()
     conn.execute("UPDATE prs SET status = ?, updated_at = ? WHERE id = ?", (to, ts, pr["id"]))
     conn.execute(
-        "INSERT INTO events (pr_id, from_status, to_status, source, forced, at)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (pr["id"], current, to, source, int(force), ts),
+        "INSERT INTO events (pr_id, from_status, to_status, source, actor, forced, at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (pr["id"], current, to, source, actor, int(force), ts),
     )
     pr["status"] = to
     pr["updated_at"] = ts

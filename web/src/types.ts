@@ -1,6 +1,9 @@
 export const STATES = ["TBD", "Implementing", "In-review", "Merged", "Abandoned"] as const;
 export type Status = (typeof STATES)[number];
 
+// `viewer` is the restricted tailnet app: status changes only, no sync or URL edits.
+export type Mode = "full" | "viewer";
+
 export interface Plan {
   id: string;
   path: string;

@@ -1,17 +1,19 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import Markdown from "react-markdown";
 import { api } from "./api";
+import { ModeContext } from "./mode";
 import StatusPill from "./StatusPill";
 import type { PR, PrEvent } from "./types";
 
 function UrlField({ pr, onChange }: { pr: PR; onChange: () => void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const mode = useContext(ModeContext);
 
   const save = () => {
     const url = draft!.trim() || null;
     setError(null);
-    api.patchPr(pr.id, { url }).then(
+    api.patchPr(pr.id, { url }, mode).then(
       () => (setDraft(null), onChange()),
       (e) => setError(e.message),
     );
@@ -30,9 +32,11 @@ function UrlField({ pr, onChange }: { pr: PR; onChange: () => void }) {
         ) : (
           <span className="muted">no PR</span>
         )}
-        <button className="link" onClick={() => setDraft(pr.url ?? "")}>
-          edit
-        </button>
+        {mode === "full" && (
+          <button className="link" onClick={() => setDraft(pr.url ?? "")}>
+            edit
+          </button>
+        )}
       </span>
     );
   }
