@@ -5,3 +5,4 @@ __pycache__/
 *.db
 # Built by Vite (make build)
 prt/static/
+web/node_modules/
