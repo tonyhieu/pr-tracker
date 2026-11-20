@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 from starlette.testclient import TestClient
@@ -29,6 +30,23 @@ def seed(path, statuses: dict[str, str], deps: dict[str, list[str]] | None = Non
                 ),
             )
     conn.close()
+
+
+# Fake `mth -n FILE.md`: writes FILE.html with its cwd and the markdown, like a render would.
+FAKE_MTH = """#!/bin/sh
+{ pwd; cat "$2"; } > "${2%.md}.html"
+"""
+
+
+@pytest.fixture(autouse=True)
+def fake_mth(tmp_path_factory, monkeypatch):
+    """Keep every test off the real `mth`; returns the script so tests can replace it."""
+    bin_dir = tmp_path_factory.mktemp("mth-bin")
+    mth = bin_dir / "mth"
+    mth.write_text(FAKE_MTH)
+    mth.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    return mth
 
 
 @pytest.fixture

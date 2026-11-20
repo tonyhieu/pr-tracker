@@ -7,11 +7,11 @@ from pathlib import Path
 
 from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from prt import db, github, ingest, parser, states
+from prt import db, github, ingest, parser, render, states
 from prt.events import Broker
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -58,12 +58,13 @@ async def list_plans(request: Request) -> JSONResponse:
     return JSONResponse([plan_summary(conn, r)[0] for r in rows])
 
 
-def plan_detail(conn: sqlite3.Connection, plan_id: str) -> dict | None:
+def plan_detail(conn: sqlite3.Connection, html_dir: Path, plan_id: str) -> dict | None:
     row = conn.execute("SELECT * FROM plans WHERE id = ?", (plan_id,)).fetchone()
     if row is None:
         return None
     plan, prs = plan_summary(conn, row)
     plan["prs"] = prs
+    plan["spec_url"] = render.spec_url(html_dir, plan_id)
     return plan
 
 
@@ -79,10 +80,24 @@ async def json_object(request: Request) -> dict | JSONResponse:
 
 
 async def get_plan(request: Request) -> JSONResponse:
-    plan = plan_detail(request.app.state.db, request.path_params["id"])
+    state = request.app.state
+    plan = plan_detail(state.db, state.html_dir, request.path_params["id"])
     if plan is None:
         return error(404, "plan not found")
     return JSONResponse(plan)
+
+
+async def get_spec(request: Request) -> Response:
+    state = request.app.state
+    plan_id = request.path_params["id"]
+    if state.db.execute("SELECT 1 FROM plans WHERE id = ?", (plan_id,)).fetchone() is None:
+        return error(404, "plan not found")
+    path = render.html_path(state.html_dir, plan_id)
+    if not path.is_file():
+        return error(404, "plan has not rendered yet")
+    # Spec HTML can carry scripts; sandbox it to an opaque origin so they cannot reach the app.
+    csp = {"Content-Security-Policy": "sandbox allow-scripts allow-popups"}
+    return FileResponse(path, media_type="text/html", headers=csp)
 
 
 async def register_plan(request: Request) -> JSONResponse:
@@ -109,13 +124,15 @@ async def register_plan(request: Request) -> JSONResponse:
     except parser.StaleFile:
         return error(409, f"{path} changed while registering; retry")
     request.app.state.broker.publish(plan_id)
-    return JSONResponse(plan_detail(conn, plan_id))
+    request.app.state.renderer.schedule(plan_id)
+    return JSONResponse(plan_detail(conn, request.app.state.html_dir, plan_id))
 
 
 async def patch_plan(request: Request) -> JSONResponse:
     conn = request.app.state.db
+    html_dir = request.app.state.html_dir
     plan_id = request.path_params["id"]
-    if plan_detail(conn, plan_id) is None:
+    if plan_detail(conn, html_dir, plan_id) is None:
         return error(404, "plan not found")
     body = await json_object(request)
     if isinstance(body, JSONResponse):
@@ -125,7 +142,7 @@ async def patch_plan(request: Request) -> JSONResponse:
     with conn:
         conn.execute("UPDATE plans SET archived = ? WHERE id = ?", (int(body["archived"]), plan_id))
     request.app.state.broker.publish(plan_id)
-    return JSONResponse(plan_detail(conn, plan_id))
+    return JSONResponse(plan_detail(conn, html_dir, plan_id))
 
 
 async def lookup_pr(request: Request) -> JSONResponse:
@@ -226,10 +243,19 @@ def create_app(
     async def lifespan(app: Starlette):
         app.state.db = db.connect(db_path)
         app.state.broker = Broker()
+        # Rendered plans are cached beside the DB, e.g. ~/.local/share/pr-tracker/html/.
+        app.state.html_dir = Path(db_path).parent / "html"
+        renderer = app.state.renderer = render.Renderer(
+            app.state.db, app.state.html_dir, app.state.broker.publish
+        )
+        renderer.schedule_unrendered()
+
+        def on_file_change(plan_id: str) -> None:
+            app.state.broker.publish(plan_id)
+            renderer.schedule(plan_id)
+
         tasks = [
-            asyncio.create_task(
-                ingest.watch(app.state.db, app.state.broker.publish, watch_interval)
-            ),
+            asyncio.create_task(ingest.watch(app.state.db, on_file_change, watch_interval)),
             asyncio.create_task(github.poll(app.state.db, app.state.broker.publish, sync_interval)),
         ]
         try:
@@ -239,6 +265,7 @@ def create_app(
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+            await renderer.close()
             app.state.db.close()
 
     # StaticFiles fails on requests if the directory is missing, e.g. before `make build`.
@@ -248,6 +275,7 @@ def create_app(
         Route("/api/plans", register_plan, methods=["POST"]),
         Route("/api/plans/{id}", get_plan),
         Route("/api/plans/{id}", patch_plan, methods=["PATCH"]),
+        Route("/api/plans/{id}/spec", get_spec),
         Route("/api/prs", lookup_pr),
         Route("/api/prs/{id}", get_pr),
         Route("/api/prs/{id}", patch_pr, methods=["PATCH"]),
