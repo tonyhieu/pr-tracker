@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { api } from "./api";
+import { ModeContext } from "./mode";
 import { STATES, type PR, type Status } from "./types";
 
 const FORCE = "__force__";
@@ -7,11 +8,12 @@ const FORCE = "__force__";
 export default function StatusPill({ pr, onChange }: { pr: PR; onChange: () => void }) {
   const [forcing, setForcing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const mode = useContext(ModeContext);
 
   const patch = (status: Status, force: boolean) => {
     setError(null);
     // Refetch on failure too: a 409 means the shown status was stale.
-    api.patchPr(pr.id, { status, force }).then(onChange, (e) => (setError(e.message), onChange()));
+    api.patchPr(pr.id, { status, force }, mode).then(onChange, (e) => (setError(e.message), onChange()));
   };
 
   const pick = (value: string) => {

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { ModeContext } from "./mode";
 import PlanView from "./PlanView";
 import Sidebar from "./Sidebar";
 import SpecView from "./SpecView";
-import type { Plan, PlanDetail } from "./types";
+import type { Mode, Plan, PlanDetail } from "./types";
 
 // `#/plan/<id>`, or `#/plan/<id>/spec` for the original plan view.
 function planIdFromHash(): string | null {
@@ -14,6 +15,7 @@ function planIdFromHash(): string | null {
 const specFromHash = () => /^#\/plan\/[^/]+\/spec$/.test(window.location.hash);
 
 export default function App() {
+  const [mode, setMode] = useState<Mode | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedId, setSelectedId] = useState(planIdFromHash);
   const [showSpec, setShowSpec] = useState(specFromHash);
@@ -51,6 +53,7 @@ export default function App() {
     // Fires on the first connect and every reconnect, so state never goes stale.
     es.onopen = () => {
       setConnected(true);
+      api.mode().then(setMode, (e) => setError(e.message));
       loadPlans();
       loadPlan(selectedRef.current);
     };
@@ -78,9 +81,11 @@ export default function App() {
         <h1>PR tracker</h1>
         <div className="header-right">
           {syncError && <span className="error">{syncError}</span>}
-          <button onClick={sync} disabled={syncing}>
-            {syncing ? "Syncing..." : "Sync GitHub"}
-          </button>
+          {mode === "full" && (
+            <button onClick={sync} disabled={syncing}>
+              {syncing ? "Syncing..." : "Sync GitHub"}
+            </button>
+          )}
           <span className={`conn ${connected ? "on" : "off"}`}>
             {connected ? "Live" : "Disconnected"}
           </span>
@@ -91,8 +96,10 @@ export default function App() {
         {error && <p className="error">{error}</p>}
         {plan && showSpec ? (
           <SpecView plan={plan} />
-        ) : plan ? (
-          <PlanView plan={plan} onChange={() => (loadPlans(), loadPlan(plan.id))} />
+        ) : plan && mode ? (
+          <ModeContext value={mode}>
+            <PlanView plan={plan} onChange={() => (loadPlans(), loadPlan(plan.id))} />
+          </ModeContext>
         ) : (
           !error && <p className="muted">Select a plan.</p>
         )}

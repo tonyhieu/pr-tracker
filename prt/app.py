@@ -221,6 +221,10 @@ async def patch_pr(request: Request) -> JSONResponse:
     return JSONResponse(find_pr(conn, pr["id"]))
 
 
+async def get_mode(request: Request) -> JSONResponse:
+    return JSONResponse({"mode": "full"})
+
+
 async def run_sync(request: Request) -> JSONResponse:
     app = request.app
     return JSONResponse(await github.sync(app.state.db, app.state.broker.publish))
@@ -271,6 +275,7 @@ def create_app(
     # StaticFiles fails on requests if the directory is missing, e.g. before `make build`.
     STATIC_DIR.mkdir(exist_ok=True)
     routes = [
+        Route("/api/mode", get_mode),
         Route("/api/plans", list_plans),
         Route("/api/plans", register_plan, methods=["POST"]),
         Route("/api/plans/{id}", get_plan),

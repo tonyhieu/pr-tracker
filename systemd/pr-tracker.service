@@ -1,0 +1,16 @@
+# User unit for remote hosting; see docs/remote-hosting.md.
+[Unit]
+Description=PR tracker (full API on 4747, tailnet viewer on 4748)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/GitHub/pr-tracker
+# The venv python directly: a `uv run` parent process would add ~27 MB RSS
+ExecStart=%h/GitHub/pr-tracker/.venv/bin/python -m prt
+Environment=PRT_VIEWER_PORT=4748
+# systemd uses a bare PATH; mth, uv, pandoc, and gh live in these directories
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

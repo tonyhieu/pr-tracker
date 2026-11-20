@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily PR tracker DB backup
+
+[Timer]
+OnCalendar=daily
+# Run at the next boot if the host was off at the scheduled time
+Persistent=true
+
+[Install]
+WantedBy=timers.target
