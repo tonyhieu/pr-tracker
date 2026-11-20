@@ -39,7 +39,7 @@ def resolve(path: str) -> Path:
     return p
 
 
-async def _run(*cmd: str, cwd: Path) -> str | None:
+async def run(*cmd: str, cwd: Path) -> str | None:
     """Stripped stdout of `cmd`, or None on any failure."""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -65,10 +65,10 @@ async def _run(*cmd: str, cwd: Path) -> str | None:
 
 async def repo_info(spec: Path) -> tuple[str | None, str | None]:
     """(repo_dir, gh_repo) for the spec's directory; None where unknown."""
-    repo_dir = await _run("git", "rev-parse", "--show-toplevel", cwd=spec.parent)
+    repo_dir = await run("git", "rev-parse", "--show-toplevel", cwd=spec.parent)
     if repo_dir is None:
         return None, None
-    gh_repo = await _run(
+    gh_repo = await run(
         "gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner", cwd=Path(repo_dir)
     )
     return repo_dir, gh_repo
