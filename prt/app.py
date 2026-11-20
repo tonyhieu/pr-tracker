@@ -1,7 +1,8 @@
 """HTTP routes."""
 
+import asyncio
 import sqlite3
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from starlette.applications import Starlette
@@ -10,7 +11,7 @@ from starlette.responses import JSONResponse, StreamingResponse
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
-from prt import db, states
+from prt import db, ingest, parser, states
 from prt.events import Broker
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -57,14 +58,93 @@ async def list_plans(request: Request) -> JSONResponse:
     return JSONResponse([plan_summary(conn, r)[0] for r in rows])
 
 
-async def get_plan(request: Request) -> JSONResponse:
-    conn = request.app.state.db
-    row = conn.execute("SELECT * FROM plans WHERE id = ?", (request.path_params["id"],)).fetchone()
+def plan_detail(conn: sqlite3.Connection, plan_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM plans WHERE id = ?", (plan_id,)).fetchone()
     if row is None:
-        return error(404, "plan not found")
+        return None
     plan, prs = plan_summary(conn, row)
     plan["prs"] = prs
+    return plan
+
+
+async def json_object(request: Request) -> dict | JSONResponse:
+    """The request body as a dict, or a 422 response."""
+    try:
+        body = await request.json()
+    except ValueError:
+        return error(422, "body must be JSON")
+    if not isinstance(body, dict):
+        return error(422, "body must be a JSON object")
+    return body
+
+
+async def get_plan(request: Request) -> JSONResponse:
+    plan = plan_detail(request.app.state.db, request.path_params["id"])
+    if plan is None:
+        return error(404, "plan not found")
     return JSONResponse(plan)
+
+
+async def register_plan(request: Request) -> JSONResponse:
+    conn = request.app.state.db
+    body = await json_object(request)
+    if isinstance(body, JSONResponse):
+        return body
+    if set(body) != {"path"} or not isinstance(body["path"], str):
+        return error(422, "body must be {path: string}")
+    try:
+        path = ingest.resolve(body["path"])
+    except ingest.OutsideRoot as e:
+        return error(403, str(e))
+    if not path.is_file():
+        return error(404, f"{path} is not a file")
+    repo = await ingest.repo_info(path)
+    try:
+        plan_id = ingest.ingest(conn, path, repo)
+    except FileNotFoundError:
+        # Deleted after the is_file() check, e.g. during repo_info.
+        return error(404, f"{path} is not a file")
+    except (ingest.NotAPlan, UnicodeDecodeError) as e:
+        return error(422, str(e))
+    except parser.StaleFile:
+        return error(409, f"{path} changed while registering; retry")
+    request.app.state.broker.publish(plan_id)
+    return JSONResponse(plan_detail(conn, plan_id))
+
+
+async def patch_plan(request: Request) -> JSONResponse:
+    conn = request.app.state.db
+    plan_id = request.path_params["id"]
+    if plan_detail(conn, plan_id) is None:
+        return error(404, "plan not found")
+    body = await json_object(request)
+    if isinstance(body, JSONResponse):
+        return body
+    if set(body) != {"archived"} or not isinstance(body["archived"], bool):
+        return error(422, "body must be {archived: boolean}")
+    with conn:
+        conn.execute("UPDATE plans SET archived = ? WHERE id = ?", (int(body["archived"]), plan_id))
+    request.app.state.broker.publish(plan_id)
+    return JSONResponse(plan_detail(conn, plan_id))
+
+
+async def lookup_pr(request: Request) -> JSONResponse:
+    conn = request.app.state.db
+    path, number = request.query_params.get("path"), request.query_params.get("number")
+    if not path or not number:
+        return error(422, "path and number are required")
+    try:
+        spec = ingest.resolve(path)
+    except ingest.OutsideRoot:
+        return error(404, "pr not found")
+    row = conn.execute(
+        "SELECT prs.id FROM prs JOIN plans ON plans.id = prs.plan_id"
+        " WHERE plans.path = ? AND prs.number = ? AND prs.removed = 0 ORDER BY prs.position",
+        (str(spec), number),
+    ).fetchone()
+    if row is None:
+        return error(404, "pr not found")
+    return JSONResponse(find_pr(conn, row["id"]))
 
 
 async def get_pr(request: Request) -> JSONResponse:
@@ -84,12 +164,9 @@ async def patch_pr(request: Request) -> JSONResponse:
     pr = find_pr(conn, request.path_params["id"])
     if pr is None:
         return error(404, "pr not found")
-    try:
-        body = await request.json()
-    except ValueError:
-        return error(422, "body must be JSON")
-    if not isinstance(body, dict):
-        return error(422, "body must be a JSON object")
+    body = await json_object(request)
+    if isinstance(body, JSONResponse):
+        return body
     unknown = set(body) - {"status", "url", "branch", "source", "force"}
     if unknown:
         return error(422, f"unknown fields: {', '.join(sorted(unknown))}")
@@ -135,21 +212,32 @@ async def sse(request: Request) -> StreamingResponse:
     )
 
 
-def create_app(db_path: Path | str = db.DEFAULT_DB_PATH) -> Starlette:
+def create_app(
+    db_path: Path | str = db.DEFAULT_DB_PATH, watch_interval: float = ingest.WATCH_SECONDS
+) -> Starlette:
     @asynccontextmanager
     async def lifespan(app: Starlette):
         app.state.db = db.connect(db_path)
         app.state.broker = Broker()
+        watcher = asyncio.create_task(
+            ingest.watch(app.state.db, app.state.broker.publish, watch_interval)
+        )
         try:
             yield
         finally:
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
             app.state.db.close()
 
     # StaticFiles fails on requests if the directory is missing, e.g. before `make build`.
     STATIC_DIR.mkdir(exist_ok=True)
     routes = [
         Route("/api/plans", list_plans),
+        Route("/api/plans", register_plan, methods=["POST"]),
         Route("/api/plans/{id}", get_plan),
+        Route("/api/plans/{id}", patch_plan, methods=["PATCH"]),
+        Route("/api/prs", lookup_pr),
         Route("/api/prs/{id}", get_pr),
         Route("/api/prs/{id}", patch_pr, methods=["PATCH"]),
         Route("/api/events", sse),
