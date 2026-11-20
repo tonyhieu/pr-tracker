@@ -7,7 +7,17 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 
 from prt import states
-from prt.app import STATIC_DIR, error, find_pr, get_plan, get_pr, json_object, list_plans, sse
+from prt.app import (
+    STATIC_DIR,
+    error,
+    find_pr,
+    get_plan,
+    get_pr,
+    get_spec,
+    json_object,
+    list_plans,
+    sse,
+)
 
 ALL_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
@@ -53,6 +63,7 @@ def create_viewer(app: Starlette) -> Starlette:
         Route("/api/mode", get_mode),
         Route("/api/plans", list_plans),
         Route("/api/plans/{id}", get_plan),
+        Route("/api/plans/{id}/spec", get_spec),
         Route("/api/prs/{id}", get_pr),
         Route("/api/prs/{id}", patch_status, methods=["PATCH"]),
         Route("/api/events", sse),

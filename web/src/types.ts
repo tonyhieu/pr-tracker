@@ -35,6 +35,7 @@ export interface PR {
 
 export interface PlanDetail extends Plan {
   prs: PR[];
+  spec_url: string | null;
 }
 
 export interface PrEvent {

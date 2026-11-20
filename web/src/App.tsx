@@ -3,18 +3,22 @@ import { api } from "./api";
 import { ModeContext } from "./mode";
 import PlanView from "./PlanView";
 import Sidebar from "./Sidebar";
+import SpecView from "./SpecView";
 import type { Mode, Plan, PlanDetail } from "./types";
 
-// `#/plan/<id>`; a trailing `/spec` (original plan view) is ignored for now.
+// `#/plan/<id>`, or `#/plan/<id>/spec` for the original plan view.
 function planIdFromHash(): string | null {
   const m = window.location.hash.match(/^#\/plan\/([^/]+)/);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+const specFromHash = () => /^#\/plan\/[^/]+\/spec$/.test(window.location.hash);
+
 export default function App() {
   const [mode, setMode] = useState<Mode | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedId, setSelectedId] = useState(planIdFromHash);
+  const [showSpec, setShowSpec] = useState(specFromHash);
   const [plan, setPlan] = useState<PlanDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
@@ -37,7 +41,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const onHash = () => setSelectedId(planIdFromHash());
+    const onHash = () => (setSelectedId(planIdFromHash()), setShowSpec(specFromHash()));
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -88,9 +92,11 @@ export default function App() {
         </div>
       </header>
       <Sidebar plans={plans} selectedId={selectedId} />
-      <main>
+      <main className={plan && showSpec ? "spec-main" : undefined}>
         {error && <p className="error">{error}</p>}
-        {plan && mode ? (
+        {plan && showSpec ? (
+          <SpecView plan={plan} />
+        ) : plan && mode ? (
           <ModeContext value={mode}>
             <PlanView plan={plan} onChange={() => (loadPlans(), loadPlan(plan.id))} />
           </ModeContext>

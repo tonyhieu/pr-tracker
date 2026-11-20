@@ -16,6 +16,15 @@ export default function PlanView({ plan, onChange }: { plan: PlanDetail; onChang
         {plan.path}
         {plan.missing && <span className="error"> (file missing)</span>}
       </p>
+      <p>
+        {plan.spec_url ? (
+          <a href={`#/plan/${encodeURIComponent(plan.id)}/spec`}>View original plan</a>
+        ) : (
+          <span className="disabled" title="not rendered">
+            View original plan
+          </span>
+        )}
+      </p>
       {plan.notes_md && (
         <div className="notes">
           <Markdown>{plan.notes_md}</Markdown>

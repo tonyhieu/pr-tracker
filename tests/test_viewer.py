@@ -10,7 +10,7 @@ import pytest
 import uvicorn
 from starlette.testclient import TestClient
 
-from prt import backup
+from prt import backup, render
 from prt.__main__ import serve
 from prt.app import create_app
 from prt.viewer import create_viewer
@@ -42,6 +42,20 @@ def test_viewer_read_routes_match_full(clients):
         assert r.json() == full.get(path).json()
     assert viewer.get("/api/plans/nope").status_code == 404
     assert viewer.get("/api/prs/nope").status_code == 404
+
+
+def test_viewer_serves_rendered_spec(clients, db_path):
+    full, viewer = clients
+    assert viewer.get("/api/plans/p1/spec").status_code == 404
+    html = render.html_path(db_path.parent / "html", "p1")
+    html.parent.mkdir(parents=True, exist_ok=True)
+    html.write_text("<p>plan</p>")
+    r = viewer.get("/api/plans/p1/spec")
+    assert r.status_code == 200 and r.text == "<p>plan</p>"
+    assert (
+        r.headers["content-security-policy"]
+        == full.get("/api/plans/p1/spec").headers["content-security-policy"]
+    )
 
 
 def test_viewer_patch_records_human_and_actor(clients):
